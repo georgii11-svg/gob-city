@@ -1,2 +1,18 @@
-# gob-city
-My top-down open-world game
+# GOB CITY — Top Down
+
+Браузерная мини-игра в жанре top-down open-world. Работает на телефоне и компьютере.
+
+## Запуск
+Открой `index.html` в браузере.
+
+## Публикация через GitHub Pages
+1. Создай новый репозиторий на GitHub, например `gob-city`.
+2. Загрузи в него `index.html` (и этот README при желании).
+3. Открой **Settings → Pages**.
+4. В разделе Build and deployment выбери **Deploy from a branch**.
+5. Выбери ветку `main` и папку `/ (root)`, нажми **Save**.
+6. После публикации сайт появится по адресу `https://ТВОЙ-НИК.github.io/gob-city/`.
+
+## Управление
+- Компьютер: WASD — движение/руль, E — сесть в машину или выйти, Space — действие.
+- Телефон: экранные кнопки.

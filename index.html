@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#111827">
+<title>GOB CITY — Top Down</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101820;color:#fff;font-family:system-ui,-apple-system,Segoe UI,sans-serif;touch-action:none}
+canvas{display:block;width:100vw;height:100vh}
+#hud{position:fixed;inset:0;pointer-events:none;text-shadow:0 2px 3px #000}
+.panel{position:absolute;background:#101820d9;border:1px solid #ffffff26;border-radius:12px;padding:9px 12px;backdrop-filter:blur(5px)}
+#brand{top:12px;left:12px;font-weight:900;letter-spacing:1px;font-size:17px}#stats{top:54px;left:12px;font-size:13px;line-height:1.6}
+#help{top:12px;right:12px;max-width:280px;font-size:12px;line-height:1.45}
+#msg{position:absolute;top:18%;left:50%;transform:translateX(-50%);font-weight:800;background:#111827dd;padding:10px 15px;border-radius:10px;opacity:0;transition:opacity .2s;white-space:nowrap}
+#mission{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);font-size:13px;text-align:center;background:#101820d9;border-radius:10px;padding:8px 12px;max-width:85vw}
+#mobile{position:fixed;inset:0;pointer-events:none}
+.pad{position:absolute;bottom:22px;width:154px;height:154px;pointer-events:auto}
+#move{left:16px}#actions{right:16px}
+.ctrl{position:absolute;width:48px;height:48px;border-radius:13px;border:1px solid #ffffff55;background:#152233dd;color:white;font-size:20px;font-weight:800;display:grid;place-items:center;user-select:none;touch-action:none}
+#up{left:53px;top:0}#down{left:53px;bottom:0}#left{left:0;top:53px}#right{right:0;top:53px}
+#act{right:0;bottom:0;width:66px;height:66px;border-radius:50%;background:#b91c1cdd;font-size:12px}#enter{left:0;bottom:10px;width:58px;height:58px;border-radius:50%;font-size:11px}
+#reset{position:fixed;right:12px;bottom:12px;pointer-events:auto;background:#111827dd;color:white;border:1px solid #ffffff44;border-radius:9px;padding:8px 10px}
+@media(min-width:800px){#mobile{display:none}#mission{bottom:14px}}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+ <div id="brand" class="panel">🚗 GOB CITY <span style="color:#fbbf24">BETA</span></div>
+ <div id="stats" class="panel">💵 $<span id="cash">250</span><br>⭐ Розыск: <span id="wanted">0</span><br>🚙 <span id="vehicle">Пешком</span></div>
+ <div id="help" class="panel">ПК: WASD — движение · E — сесть/выйти · Пробел — действие<br>Телефон: кнопки снизу. Найди жёлтый маркер — первая миссия!</div>
+ <div id="msg"></div><div id="mission">Миссия: доберись до жёлтого маркера и заработай $100</div>
+</div>
+<div id="mobile">
+ <div class="pad" id="move">
+  <div class="ctrl" id="up" data-key="w">▲</div><div class="ctrl" id="down" data-key="s">▼</div>
+  <div class="ctrl" id="left" data-key="a">◀</div><div class="ctrl" id="right" data-key="d">▶</div>
+ </div>
+ <div class="pad" id="actions"><div class="ctrl" id="enter" data-action="enter">В / ВЫХ</div><div class="ctrl" id="act" data-action="act">ДЕЙСТВИЕ</div></div>
+</div>
+<button id="reset">↻ Сброс</button>
+<script>
+(()=> {
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+let W=innerWidth,H=innerHeight,dpr=Math.min(devicePixelRatio||1,2);
+function resize(){W=innerWidth;H=innerHeight;canvas.width=W*dpr;canvas.height=H*dpr;canvas.style.width=W+'px';canvas.style.height=H+'px';ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener('resize',resize);resize();
+const keys=new Set();let cash=Number(localStorage.gobCash||250),wanted=0,vehicle=null,missionDone=false,msgTimer=0,worldTime=0;
+const tile=300,road=94,world={w:3000,h:3000};
+const player={x:450,y:450,a:0,speed:0,r:10,hp:100};
+const cars=[];
+for(let gy=0;gy<10;gy++)for(let gx=0;gx<10;gx++){
+ if((gx===1&&gy===1)||(gx===7&&gy===7))continue;
+ const x=gx*tile+75+Math.random()*130,y=gy*tile+75+Math.random()*130;
+ cars.push({x,y,a:Math.random()*Math.PI*2,color:['#eab308','#ef4444','#38bdf8','#e5e7eb','#a78bfa','#22c55e'][Math.floor(Math.random()*6)],r:17,occupied:false,ai:Math.random()<.65,spd:.45+Math.random()*.5});
+}
+const gangs=[];
+for(let i=0;i<12;i++)gangs.push({x:200+Math.random()*2600,y:200+Math.random()*2600,a:Math.random()*6.28,c:i%2?'#fb7185':'#60a5fa',hp:2,cd:0});
+const cops=[];
+const mission={x:1250,y:850};
+function say(t){const el=document.getElementById('msg');el.textContent=t;el.style.opacity=1;msgTimer=2.5}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function roadAt(x,y){return Math.abs((x%tile)-tile/2)<road/2||Math.abs((y%tile)-tile/2)<road/2}
+function blockCollision(x,y,r=10){for(let gx=Math.floor((x-r)/tile);gx<=Math.floor((x+r)/tile);gx++)for(let gy=Math.floor((y-r)/tile);gy<=Math.floor((y+r)/tile);gy++){let cx=gx*tile+tile/2,cy=gy*tile+tile/2;if(Math.abs(x-cx)>road/2+r&&Math.abs(y-cy)>road/2+r)return true}return false}
+function nearestCar(){let best=null,bd=65;for(const c of cars){let d=dist(player,c);if(d<bd){best=c;bd=d}}return best}
+function enterExit(){if(vehicle){vehicle.occupied=false;player.x=clamp(vehicle.x+Math.cos(vehicle.a+1.5)*30,10,world.w-10);player.y=clamp(vehicle.y+Math.sin(vehicle.a+1.5)*30,10,world.h-10);vehicle=null;say('Вышел из машины');return}
+const c=nearestCar();if(c){vehicle=c;c.occupied=true;player.x=c.x;player.y=c.y;say('Машина твоя!');}else say('Подойди ближе к машине');}
+function action(){if(dist(player,mission)<55&&!missionDone){missionDone=true;cash+=100;localStorage.gobCash=cash;document.getElementById('mission').textContent='Миссия выполнена! +$100. Найди банды или покатайся по городу.';say('+$100! Красавчик, братан!');return}
+let g=gangs.find(g=>g.hp>0&&dist(player,g)<55);if(g){g.hp=0;wanted=Math.min(5,wanted+1);say('Бандит повержен! Розыск +1');return}
+wanted=Math.min(5,wanted+1);say('Шум поднят! Розыск +1');}
+function update(dt){
+ worldTime+=dt;if(msgTimer>0){msgTimer-=dt;if(msgTimer<=0)document.getElementById('msg').style.opacity=0}
+ const forward=(keys.has('w')?1:0)-(keys.has('s')?1:0),turn=(keys.has('d')?1:0)-(keys.has('a')?1:0);
+ if(vehicle){
+  vehicle.a+=turn*dt*(vehicle.speed>0?2.3:1.7);
+  const accel=forward*dt*190;vehicle.speed=clamp(vehicle.speed+accel,-90,220);vehicle.speed*=Math.pow(.985,dt*60);
+  const nx=vehicle.x+Math.cos(vehicle.a)*vehicle.speed*dt,ny=vehicle.y+Math.sin(vehicle.a)*vehicle.speed*dt;
+  if(!blockCollision(nx,ny,15)){vehicle.x=clamp(nx,10,world.w-10);vehicle.y=clamp(ny,10,world.h-10)}else{vehicle.speed*=-.25; if(Math.abs(vehicle.speed)>70)wanted=Math.min(5,wanted+1)}
+  player.x=vehicle.x;player.y=vehicle.y;
+ }else{
+  let vx=(keys.has('d')?1:0)-(keys.has('a')?1:0),vy=(keys.has('s')?1:0)-(keys.has('w')?1:0);const len=Math.hypot(vx,vy)||1;
+  vx=vx/len*145*dt;vy=vy/len*145*dt;
+  if(!blockCollision(player.x+vx,player.y))player.x=clamp(player.x+vx,8,world.w-8);
+  if(!blockCollision(player.x,player.y+vy))player.y=clamp(player.y+vy,8,world.h-8);
+  if(vx||vy)player.a=Math.atan2(vy,vx);
+ }
+ for(const c of cars){if(c.ai&&!c.occupied){c.x+=Math.cos(c.a)*c.spd*45*dt;c.y+=Math.sin(c.a)*c.spd*45*dt;if(!roadAt(c.x,c.y)||c.x<20||c.y<20||c.x>world.w-20||c.y>world.h-20)c.a+=Math.PI*(.5+Math.random()*.5)*Math.sign(Math.random()-.5);}}
+ for(const g of gangs){if(g.hp<=0)continue;g.cd-=dt;const d=dist(g,player);if(d<180){g.a=Math.atan2(player.y-g.y,player.x-g.x);if(d>28){g.x+=Math.cos(g.a)*35*dt;g.y+=Math.sin(g.a)*35*dt}else if(g.cd<=0){player.hp-=5;g.cd=1.1;if(player.hp<=0){player.hp=100;cash=Math.max(0,cash-50);player.x=450;player.y=450;vehicle=null;say('Тебя вырубили. -$50');}}}}
+ if(wanted>0&&Math.random()<dt*.12*wanted&&cops.length< wanted*2){cops.push({x:clamp(player.x+(Math.random()-.5)*600,20,world.w-20),y:clamp(player.y+(Math.random()-.5)*600,20,world.h-20),a:0})}
+ for(const c of cops){c.a=Math.atan2(player.y-c.y,player.x-c.x);c.x+=Math.cos(c.a)*55*dt;c.y+=Math.sin(c.a)*55*dt;if(dist(c,player)<22&&wanted>0){wanted=Math.max(0,wanted-1);cops.splice(cops.indexOf(c),1);cash=Math.max(0,cash-20);say('Полиция поймала! -$20');break}}
+ document.getElementById('cash').textContent=cash;document.getElementById('wanted').textContent='★'.repeat(wanted)||'0';document.getElementById('vehicle').textContent=vehicle?'За рулём':'Пешком';
+}
+function draw(){
+ ctx.clearRect(0,0,W,H);const camX=clamp(player.x-W/2,0,world.w-W),camY=clamp(player.y-H/2,0,world.h-H);
+ ctx.save();ctx.translate(-camX,-camY);
+ ctx.fillStyle='#355b43';ctx.fillRect(0,0,world.w,world.h);
+ // city blocks and roads
+ for(let x=0;x<world.w;x+=tile)for(let y=0;y<world.h;y+=tile){
+  ctx.fillStyle='#343d43';ctx.fillRect(x,y,tile,tile);
+  ctx.fillStyle='#777d7f';ctx.fillRect(x+tile/2-road/2,y,road,tile);ctx.fillRect(x,y+tile/2-road/2,tile,road);
+  ctx.fillStyle='#e9d77c';for(let i=0;i<tile;i+=32){ctx.fillRect(x+tile/2-2,y+i,4,14);ctx.fillRect(x+i,y+tile/2-2,14,4)}
+  ctx.fillStyle=['#6c747b','#8a8175','#53616a','#81736b'][((x/tile+y/tile)%4+4)%4];ctx.fillRect(x+18,y+18,tile/2-road/2-24,tile/2-road/2-24);
+  ctx.fillStyle='#242e36';ctx.fillRect(x+27,y+27,tile/2-road/2-42,tile/2-road/2-42);
+  ctx.fillStyle='#9ac5d9';for(let wx=x+38;wx<x+tile/2-road/2-50;wx+=22)for(let wy=y+38;wy<y+tile/2-road/2-50;wy+=22)ctx.fillRect(wx,wy,8,8);
+ }
+ // mission marker
+ if(!missionDone){ctx.strokeStyle='#facc15';ctx.lineWidth=5;ctx.beginPath();ctx.arc(mission.x,mission.y,28+Math.sin(worldTime*4)*5,0,Math.PI*2);ctx.stroke();ctx.fillStyle='#facc15';ctx.font='bold 14px system-ui';ctx.fillText('$100',mission.x-18,mission.y-40)}
+ for(const c of cars){if(c.occupied)continue;drawCar(c.x,c.y,c.a,c.color)}
+ for(const g of gangs){if(g.hp<=0)continue;ctx.fillStyle=g.c;ctx.beginPath();ctx.arc(g.x,g.y,10,0,Math.PI*2);ctx.fill();ctx.fillStyle='#111';ctx.fillRect(g.x-6,g.y-16,12,3)}
+ for(const c of cops)drawCar(c.x,c.y,c.a,'#e5e7eb',true);
+ if(!vehicle){ctx.save();ctx.translate(player.x,player.y);ctx.rotate(player.a);ctx.fillStyle='#fbbf24';ctx.beginPath();ctx.moveTo(15,0);ctx.lineTo(-9,-8);ctx.lineTo(-6,0);ctx.lineTo(-9,8);ctx.closePath();ctx.fill();ctx.restore()}
+ ctx.restore();
+ // minimap
+ const mw=112,mh=112,mx=W-mw-14,my=H-mh- (H<500?125:14);ctx.fillStyle='#0b1118d9';ctx.fillRect(mx,my,mw,mh);ctx.strokeStyle='#ffffff55';ctx.strokeRect(mx,my,mw,mh);
+ ctx.fillStyle='#747d82';for(let i=0;i<=10;i++){ctx.fillRect(mx+i*mw/10,my,3,mh);ctx.fillRect(mx,my+i*mh/10,mw,3)}
+ ctx.fillStyle='#fbbf24';ctx.beginPath();ctx.arc(mx+player.x/world.w*mw,my+player.y/world.h*mh,4,0,7);ctx.fill();
+}
+function drawCar(x,y,a,color,police=false){ctx.save();ctx.translate(x,y);ctx.rotate(a);ctx.fillStyle='#111';ctx.fillRect(-17,-10,36,22);ctx.fillStyle=color;ctx.fillRect(-16,-9,32,18);ctx.fillStyle='#a5d7e8';ctx.fillRect(-5,-7,11,14);ctx.fillStyle='#fff4bf';ctx.fillRect(12,-7,3,4);ctx.fillRect(12,3,3,4);if(police){ctx.fillStyle='#ef4444';ctx.fillRect(-3,-9,5,3);ctx.fillStyle='#3b82f6';ctx.fillRect(2,-9,5,3)}ctx.restore()}
+let last=performance.now();function loop(now){const dt=Math.min((now-last)/1000,.04);last=now;update(dt);draw();requestAnimationFrame(loop)}requestAnimationFrame(loop);
+addEventListener('keydown',e=>{const k=e.key.toLowerCase();if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright',' '].includes(k))e.preventDefault();keys.add(k);if(k==='e')enterExit();if(k===' ')action()});
+addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
+document.querySelectorAll('[data-key]').forEach(el=>{const k=el.dataset.key;const on=e=>{e.preventDefault();keys.add(k)},off=e=>{e.preventDefault();keys.delete(k)};el.addEventListener('pointerdown',on);['pointerup','pointercancel','pointerleave'].forEach(ev=>el.addEventListener(ev,off))});
+document.querySelector('[data-action="enter"]').addEventListener('pointerdown',e=>{e.preventDefault();enterExit()});
+document.querySelector('[data-action="act"]').addEventListener('pointerdown',e=>{e.preventDefault();action()});
+document.getElementById('reset').addEventListener('click',()=>{cash=250;wanted=0;missionDone=false;player.x=450;player.y=450;player.hp=100;vehicle=null;cops.length=0;localStorage.gobCash=cash;document.getElementById('mission').textContent='Миссия: доберись до жёлтого маркера и заработай $100';say('Новая игра!')});
+})();
+</script>
+</body>
+</html>
